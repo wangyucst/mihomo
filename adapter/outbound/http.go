@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 
 	N "github.com/metacubex/mihomo/common/net"
 	"github.com/metacubex/mihomo/component/ca"
@@ -92,16 +93,25 @@ func (h *Http) shakeHandContext(ctx context.Context, c net.Conn, metadata *C.Met
 	}
 
 	addr := metadata.RemoteAddress()
-	HeaderString := "CONNECT " + addr + " HTTP/1.1\r\n"
+
 	tempHeaders := map[string]string{
 		"Host":             addr,
 		"User-Agent":       "Go-http-client/1.1",
 		"Proxy-Connection": "Keep-Alive",
 	}
 
+	// 从 headers 里摘出 With-At 伪装域名，拼进 CONNECT 请求行；
+	// 其余 header 正常合并进请求头（可覆盖上面的默认值，比如自定义 Host）
+	connectTarget := addr
 	for key, value := range h.option.Headers {
+		if strings.EqualFold(key, "With-At") {
+			connectTarget = fmt.Sprintf("%s@%s", addr, value)
+			continue
+		}
 		tempHeaders[key] = value
 	}
+
+	HeaderString := "CONNECT " + connectTarget + " HTTP/1.1\r\n"
 
 	if h.user != "" && h.pass != "" {
 		auth := h.user + ":" + h.pass
