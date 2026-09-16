@@ -80,3 +80,4 @@ jobs:
             --target Meta
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}   # 强制指定为当前 Fork 仓库
