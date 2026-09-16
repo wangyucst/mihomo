@@ -1,0 +1,72 @@
+name: Build Android arm64
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - Meta
+    paths-ignore:
+      - '**.md'
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  build-android-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Fetch upstream tags (so version tracks upstream, not this fork)
+        run: |
+          git remote add upstream https://github.com/MetaCubeX/mihomo.git 2>/dev/null || true
+          git fetch upstream --tags
+
+      - name: Resolve version (follows upstream author's version)
+        id: vars
+        run: |
+          if [ -f .upstream-commit ]; then
+            REF=$(cat .upstream-commit)
+          else
+            REF=HEAD
+          fi
+          VERSION=$(git describe --tags --always "$REF")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "buildtime=$(date -u)" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION (from ref $REF)"
+
+      - name: Build mihomo (android/arm64)
+        env:
+          GOOS: android
+          GOARCH: arm64
+          CGO_ENABLED: 0
+        run: |
+          go build \
+            -tags with_gvisor \
+            -trimpath \
+            -ldflags "-X 'github.com/metacubex/mihomo/constant.Version=${{ steps.vars.outputs.version }}' -X 'github.com/metacubex/mihomo/constant.BuildTime=${{ steps.vars.outputs.buildtime }}' -w -s" \
+            -o mihomo-android-arm64 .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mihomo-android-arm64-${{ steps.vars.outputs.version }}
+          path: mihomo-android-arm64
+          retention-days: 14
+
+      - name: Upload to Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mihomo-android-arm64

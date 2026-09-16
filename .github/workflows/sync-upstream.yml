@@ -1,0 +1,81 @@
+name: Sync upstream + reapply custom patch
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 18 * * *'    # 每天 UTC 18:00（北京时间凌晨2点），可自行调整
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          ref: Meta
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote and fetch
+        run: |
+          git remote add upstream https://github.com/MetaCubeX/mihomo.git 2>/dev/null || true
+          # 分支和标签分开抓取；标签用 --force，避免上游滚动标签（如 Prerelease-Alpha）
+          # 和本地旧标签冲突导致 fetch 整体失败
+          git fetch upstream Meta
+          git fetch --force --tags upstream
+
+      - name: Check if already up to date
+        id: check
+        run: |
+          UPSTREAM_SHA=$(git rev-parse upstream/Meta)
+          if [ -f .upstream-commit ] && [ "$(cat .upstream-commit)" = "$UPSTREAM_SHA" ]; then
+            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "up_to_date=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Reset branch to upstream and reapply patch
+        if: steps.check.outputs.up_to_date == 'false'
+        run: |
+          set -e
+          git reset --hard upstream/Meta
+
+          if git apply --check patches/with-at.patch 2>/tmp/apply-err.log; then
+            git apply patches/with-at.patch
+          else
+            echo "PATCH_FAILED=true" >> "$GITHUB_ENV"
+            cat /tmp/apply-err.log
+            exit 1
+          fi
+
+          echo "${{ steps.check.outputs.upstream_sha }}" > .upstream-commit
+
+          git add -A
+          git commit -m "chore: sync upstream (${{ steps.check.outputs.upstream_sha }}) + reapply With-At patch"
+          git push origin Meta --force
+
+      # 自动开 issue 只是锦上添花；如果仓库 Actions 权限是"只读"，这一步会失败但不影响主流程，
+      # 所以加 continue-on-error，不让它掩盖真正的失败原因
+      - name: Open issue if patch failed to apply
+        if: failure()
+        continue-on-error: true
+        run: |
+          gh issue create \
+            --title "⚠️ 自动同步失败：With-At 补丁无法应用" \
+            --body "上游 mihomo 有更新，但自动重新应用 patches/with-at.patch 失败了，需要你手动合并一下 adapter/outbound/http.go。日志：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Already up to date
+        if: steps.check.outputs.up_to_date == 'true'
+        run: echo "已经是最新，无需同步。"
