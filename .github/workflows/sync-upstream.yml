@@ -84,6 +84,7 @@ jobs:
           gh workflow run build-android-arm64.yml --ref Meta
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
 
       - name: Open issue if patch failed to apply
         if: failure()
@@ -94,6 +95,7 @@ jobs:
             --body "上游 mihomo 有更新，但自动重新应用 patches/with-at.patch 失败了，需要你手动合并一下 adapter/outbound/http.go。日志：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
 
       - name: Already up to date
         if: steps.check.outputs.up_to_date == 'true'
