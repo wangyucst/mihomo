@@ -31,7 +31,7 @@ jobs:
       - name: Fetch upstream tags (so version tracks upstream, not this fork)
         run: |
           git remote add upstream https://github.com/MetaCubeX/mihomo.git 2>/dev/null || true
-          git fetch upstream --tags
+          git fetch --force --tags upstream
 
       - name: Resolve version (follows upstream author's version)
         id: vars
