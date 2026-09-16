@@ -3,11 +3,12 @@ name: Sync upstream + reapply custom patch
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 18 * * *'    # 每天 UTC 18:00（北京时间凌晨2点），可自行调整
+    - cron: '0 18 * * *'    # 每天 UTC 18:00（北京时间凌晨2点）自动同步
 
 permissions:
   contents: write
   issues: write
+  actions: write            # 赋予触发其他工作流的权限
 
 jobs:
   sync:
@@ -28,8 +29,6 @@ jobs:
       - name: Add upstream remote and fetch
         run: |
           git remote add upstream https://github.com/MetaCubeX/mihomo.git 2>/dev/null || true
-          # 分支和标签分开抓取；标签用 --force，避免上游滚动标签（如 Prerelease-Alpha）
-          # 和本地旧标签冲突导致 fetch 整体失败
           git fetch upstream Meta
           git fetch --force --tags upstream
 
@@ -48,8 +47,23 @@ jobs:
         if: steps.check.outputs.up_to_date == 'false'
         run: |
           set -e
+          
+          # 1. 仅备份 patches 目录与这两个指定的自定义工作流文件
+          mkdir -p /tmp/custom_backup/workflows
+          [ -d patches ] && cp -r patches /tmp/custom_backup/
+          [ -f .github/workflows/sync-upstream.yml ] && cp .github/workflows/sync-upstream.yml /tmp/custom_backup/workflows/
+          [ -f .github/workflows/build-android-arm64.yml ] && cp .github/workflows/build-android-arm64.yml /tmp/custom_backup/workflows/
+
+          # 2. 重置为上游最新状态（正常接收上游 .github 中其他文件更新）
           git reset --hard upstream/Meta
 
+          # 3. 将你的两个工作流和补丁恢复回去
+          [ -d /tmp/custom_backup/patches ] && cp -r /tmp/custom_backup/patches .
+          mkdir -p .github/workflows
+          [ -f /tmp/custom_backup/workflows/sync-upstream.yml ] && cp /tmp/custom_backup/workflows/sync-upstream.yml .github/workflows/
+          [ -f /tmp/custom_backup/workflows/build-android-arm64.yml ] && cp /tmp/custom_backup/workflows/build-android-arm64.yml .github/workflows/
+
+          # 4. 校验并应用免流补丁
           if git apply --check patches/with-at.patch 2>/tmp/apply-err.log; then
             git apply patches/with-at.patch
           else
@@ -64,8 +78,13 @@ jobs:
           git commit -m "chore: sync upstream (${{ steps.check.outputs.upstream_sha }}) + reapply With-At patch"
           git push origin Meta --force
 
-      # 自动开 issue 只是锦上添花；如果仓库 Actions 权限是"只读"，这一步会失败但不影响主流程，
-      # 所以加 continue-on-error，不让它掩盖真正的失败原因
+      - name: Trigger build workflow
+        if: steps.check.outputs.up_to_date == 'false'
+        run: |
+          gh workflow run build-android-arm64.yml --ref Meta
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Open issue if patch failed to apply
         if: failure()
         continue-on-error: true
