@@ -46,7 +46,7 @@ jobs:
           echo "buildtime=$(date -u)" >> "$GITHUB_OUTPUT"
           echo "Resolved version: $VERSION (from ref $REF)"
 
-      - name: Build mihomo (android/arm64)
+      - name: Build and Compress mihomo (android/arm64)
         env:
           GOOS: android
           GOARCH: arm64
@@ -57,16 +57,26 @@ jobs:
             -trimpath \
             -ldflags "-X 'github.com/metacubex/mihomo/constant.Version=${{ steps.vars.outputs.version }}' -X 'github.com/metacubex/mihomo/constant.BuildTime=${{ steps.vars.outputs.buildtime }}' -w -s" \
             -o mihomo-android-arm64 .
+          
+          # 打包为 .gz 格式
+          gzip -f mihomo-android-arm64
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: mihomo-android-arm64-${{ steps.vars.outputs.version }}
-          path: mihomo-android-arm64
+          path: mihomo-android-arm64.gz
           retention-days: 14
 
-      - name: Upload to Release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: mihomo-android-arm64
+      - name: Create or Update Release
+        run: |
+          gh release delete latest --yes 2>/dev/null || true
+          git tag -d latest 2>/dev/null || true
+          git push origin :refs/tags/latest 2>/dev/null || true
+          
+          gh release create latest mihomo-android-arm64.gz \
+            --title "Mihomo Android ARM64 (FreeFlow Custom)" \
+            --notes "基于上游最新 Commit (${{ steps.vars.outputs.version }}) 编译，支持 With-At 免流。" \
+            --target Meta
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
