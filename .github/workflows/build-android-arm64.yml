@@ -1,4 +1,4 @@
-name: Build Android arm64
+name: Build Android (arm64 & armv7)
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ permissions:
   contents: write
 
 jobs:
-  build-android-arm64:
+  build-android:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -50,6 +50,7 @@ jobs:
           echo "buildtime=$(date -u)" >> "$GITHUB_OUTPUT"
           echo "Resolved version: $VERSION (from ref $REF)"
 
+      # ================= 【编译 ARM64】 =================
       - name: Build and Compress mihomo (android/arm64)
         env:
           GOOS: android
@@ -62,26 +63,43 @@ jobs:
             -ldflags "-X 'github.com/metacubex/mihomo/constant.Version=${{ steps.vars.outputs.version }}' -X 'github.com/metacubex/mihomo/constant.BuildTime=${{ steps.vars.outputs.buildtime }}' -w -s" \
             -o mihomo-android-arm64 .
           
-          # 打包为 .gz 格式
           gzip -f mihomo-android-arm64
 
+      # ================= 【编译 ARMv7】 =================
+      - name: Build and Compress mihomo (android/armv7)
+        env:
+          GOOS: android
+          GOARCH: arm
+          GOARM: 7
+          CGO_ENABLED: 0
+        run: |
+          go build \
+            -tags with_gvisor \
+            -trimpath \
+            -ldflags "-X 'github.com/metacubex/mihomo/constant.Version=${{ steps.vars.outputs.version }}' -X 'github.com/metacubex/mihomo/constant.BuildTime=${{ steps.vars.outputs.buildtime }}' -w -s" \
+            -o mihomo-android-armv7 .
+          
+          gzip -f mihomo-android-armv7
+
+      # ================= 【上传 Artifacts】 =================
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mihomo-android-arm64-${{ steps.vars.outputs.version }}
-          path: mihomo-android-arm64.gz
+          name: mihomo-android-${{ steps.vars.outputs.version }}
+          path: mihomo-android-*.gz
           retention-days: 14
 
+      # ================= 【发布 Release】 =================
       - name: Create or Update Release
         run: |
           gh release delete latest --yes 2>/dev/null || true
           git tag -d latest 2>/dev/null || true
           git push origin :refs/tags/latest 2>/dev/null || true
           
-          gh release create latest mihomo-android-arm64.gz \
-            --title "Mihomo Android ARM64 (FreeFlow Custom)" \
-            --notes "基于上游最新 Commit (${{ steps.vars.outputs.version }}) 编译，支持 With-At 免流。" \
+          gh release create latest mihomo-android-arm64.gz mihomo-android-armv7.gz \
+            --title "Mihomo Android Multi-Arch (FreeFlow Custom)" \
+            --notes "基于上游最新 Commit (${{ steps.vars.outputs.version }}) 编译，包含 ARM64 与 ARMv7 (32位) 架构，支持 With-At 免流。" \
             --target Meta
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}   # 强制指定为当前 Fork 仓库
+          GH_REPO: ${{ github.repository }}
